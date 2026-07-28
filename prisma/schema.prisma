@@ -1,0 +1,105 @@
+// Prisma schema for LabTimeShare — GPU Access Self-Service Portal
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// ─── Enums ────────────────────────────────────────────────────────────────────
+
+enum Role {
+  USER
+  APPROVER
+  ADMIN
+}
+
+enum UserStatus {
+  PENDING
+  ACTIVE
+  DISABLED
+}
+
+enum AccessPath {
+  API_KEY
+  SHELL_ACCESS
+}
+
+enum RequestStatus {
+  PENDING
+  APPROVED
+  DENIED
+  REVOKED
+}
+
+// ─── Models ───────────────────────────────────────────────────────────────────
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  username     String   @unique
+  passwordHash String
+  role         Role     @default(USER)
+  status       UserStatus @default(PENDING)
+  createdAt    DateTime @default(now())
+
+  requests  AccessRequest[] @relation("UserRequests")
+  auditLogs AuditLog[]      @relation("ActorLogs")
+}
+
+model AccessRequest {
+  id                     String        @id @default(cuid())
+  userId                 String
+  path                   AccessPath
+  status                 RequestStatus @default(PENDING)
+  requestedDurationHours Int
+  grantedAt              DateTime?
+  expiresAt              DateTime?
+  reviewedBy             String?
+  reviewedAt             DateTime?
+  notes                  String?
+  createdAt              DateTime      @default(now())
+
+  user       User        @relation("UserRequests", fields: [userId], references: [id])
+  apiKeyGrant ApiKeyGrant?
+  shellGrant  ShellGrant?
+}
+
+model ApiKeyGrant {
+  id        String    @id @default(cuid())
+  requestId String    @unique
+  apiKey    String    @unique
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  revokedAt DateTime?
+
+  request AccessRequest @relation(fields: [requestId], references: [id])
+}
+
+model ShellGrant {
+  id           String    @id @default(cuid())
+  requestId    String    @unique
+  linuxUsername String
+  sshPublicKey  String
+  sshPrivateKey String?
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  revokedAt    DateTime?
+
+  request AccessRequest @relation(fields: [requestId], references: [id])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String
+  action     String
+  targetId   String?
+  targetType String?
+  metadata   String?
+  createdAt  DateTime @default(now())
+
+  actor User @relation("ActorLogs", fields: [actorId], references: [id])
+}

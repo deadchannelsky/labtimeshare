@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+
+# Environment variables — never commit real secrets
+.env
+.env.local
+.env.*.local
+
+# Next.js build output
+.next/
+
+# Prisma generated client
+/generated/
+
+# SQLite database — instance data, not source
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Prisma migration lock (keep migrations, not the lock binary)
+prisma/*.db
+
+# OS / editor
+.DS_Store
+*.swp
+*.swo
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# IDE / AI agent metadata
+.agents/
+.claude/
+.windsurf/
+skills-lock.json

@@ -1,0 +1,34 @@
+[Unit]
+Description=LabTimeShare GPU Access Self-Service Portal
+After=network.target
+
+[Service]
+Type=simple
+
+# ── Change these to match your deployment ──────────────────────────────────────
+User=nodeuser
+Group=nodeuser
+WorkingDirectory=/opt/labtimeshare
+# ───────────────────────────────────────────────────────────────────────────────
+
+# Load environment from .env file
+EnvironmentFile=/opt/labtimeshare/.env
+
+# Path to the node binary — adjust if using nvm or a custom install location
+ExecStart=/usr/bin/node /opt/labtimeshare/node_modules/.bin/next start
+
+# Restart policy
+Restart=on-failure
+RestartSec=5s
+
+# Security hardening
+NoNewPrivileges=false
+ProtectSystem=false
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=labtimeshare
+
+[Install]
+WantedBy=multi-user.target
