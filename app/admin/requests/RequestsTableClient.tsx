@@ -166,30 +166,45 @@ export default function RequestsTableClient({
                 </td>
               </tr>
             ) : (
-              filtered.map((row) => (
-                <tr key={row.id} className="hover:bg-gray-50 align-top">
-                  <td className="px-4 py-3">
-                    <div className="font-medium text-gray-900">
-                      {row.user.username}
-                    </div>
-                    <div className="text-xs text-gray-500">{row.user.email}</div>
-                  </td>
-                  <td className="px-4 py-3">{pathBadge(row.path)}</td>
-                  <td className="px-4 py-3 whitespace-nowrap text-gray-700">
-                    {row.requestedDurationHours}h
-                  </td>
-                  <td className="px-4 py-3">{statusBadge(row.status)}</td>
-                  <td className="px-4 py-3 whitespace-nowrap text-gray-700">
-                    {formatDate(row.createdAt)}
-                  </td>
-                  <td className="px-4 py-3 whitespace-nowrap text-gray-700">
-                    {formatDate(row.expiresAt)}
-                  </td>
-                  <td className="px-4 py-3 min-w-[200px]">
-                    <RequestActionsRow row={row} />
-                  </td>
-                </tr>
-              ))
+              filtered.map((row) => {
+                const actions = RequestActionsRow({ row });
+                const panelNode = actions.panelContent();
+                return (
+                  <>
+                    <tr key={row.id} className="hover:bg-gray-50 align-middle">
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-gray-900">
+                          {row.user.username}
+                        </div>
+                        <div className="text-xs text-gray-500">{row.user.email}</div>
+                      </td>
+                      <td className="px-4 py-3">{pathBadge(row.path)}</td>
+                      <td className="px-4 py-3 whitespace-nowrap text-gray-700">
+                        {row.requestedDurationHours}h
+                      </td>
+                      <td className="px-4 py-3">{statusBadge(row.status)}</td>
+                      <td className="px-4 py-3 whitespace-nowrap text-gray-700">
+                        {formatDate(row.createdAt)}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap text-gray-700">
+                        {formatDate(row.expiresAt)}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        {actions.buttons()}
+                      </td>
+                    </tr>
+                    {panelNode && (
+                      <tr key={`${row.id}-panel`} className="bg-gray-50 border-b border-gray-200">
+                        <td colSpan={7} className="px-0 py-0">
+                          <div className="border-t border-gray-200">
+                            {panelNode}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </>
+                );
+              })
             )}
           </tbody>
         </table>
