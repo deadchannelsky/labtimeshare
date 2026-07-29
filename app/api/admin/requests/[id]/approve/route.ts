@@ -66,10 +66,17 @@ export async function POST(
     });
   }
 
-  if (existing.path === "API_KEY") {
-    await provisionApiKey(id);
-  } else {
-    await provisionShellAccess(id);
+  try {
+    if (existing.path === "API_KEY") {
+      await provisionApiKey(id);
+    } else {
+      await provisionShellAccess(id);
+    }
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "Provisioning failed";
+    console.error("[approve] Provisioning error:", err);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 
   await writeAuditLog({

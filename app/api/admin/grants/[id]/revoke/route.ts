@@ -50,7 +50,13 @@ export async function POST(
     }
     requestId = grant.requestId;
     targetType = "ApiKeyGrant";
-    await revokeApiKey(id);
+    try {
+      await revokeApiKey(id);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Revocation failed";
+      console.error("[revoke] revokeApiKey error:", err);
+      return NextResponse.json({ error: message }, { status: 500 });
+    }
   } else {
     const grant = await prisma.shellGrant.findUnique({ where: { id } });
     if (!grant) {
@@ -58,7 +64,13 @@ export async function POST(
     }
     requestId = grant.requestId;
     targetType = "ShellGrant";
-    await revokeShellAccess(id);
+    try {
+      await revokeShellAccess(id);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Revocation failed";
+      console.error("[revoke] revokeShellAccess error:", err);
+      return NextResponse.json({ error: message }, { status: 500 });
+    }
   }
 
   await prisma.accessRequest.update({

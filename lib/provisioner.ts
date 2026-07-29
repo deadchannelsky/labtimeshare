@@ -28,10 +28,8 @@ const SYSTEM_ACTOR = "system";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function getVllmKeysFile(): string {
-  const p = process.env.VLLM_KEYS_FILE;
-  if (!p) throw new Error("VLLM_KEYS_FILE env var is not set");
-  return p;
+function getVllmKeysFile(): string | null {
+  return process.env.VLLM_KEYS_FILE ?? null;
 }
 
 /**
@@ -95,14 +93,20 @@ export async function provisionApiKey(requestId: string): Promise<void> {
   const apiKey = uuidv4();
   const keysFile = getVllmKeysFile();
 
-  // Write to the vLLM router's keys file
-  try {
-    await appendLine(keysFile, apiKey);
-  } catch (err) {
-    console.error("[provisioner] Failed to write API key to keys file:", err);
-    throw new Error(
-      `API key provisioning failed: could not write to ${keysFile}`
+  // Write to the vLLM router's keys file (skip with warning if not configured)
+  if (!keysFile) {
+    console.warn(
+      "[provisioner] VLLM_KEYS_FILE is not set — API key will be stored in DB but NOT written to the router keys file."
     );
+  } else {
+    try {
+      await appendLine(keysFile, apiKey);
+    } catch (err) {
+      console.error("[provisioner] Failed to write API key to keys file:", err);
+      throw new Error(
+        `API key provisioning failed: could not write to ${keysFile}`
+      );
+    }
   }
 
   const now = new Date();
@@ -143,11 +147,15 @@ export async function revokeApiKey(grantId: string): Promise<void> {
 
   const keysFile = getVllmKeysFile();
 
-  try {
-    await removeLine(keysFile, grant.apiKey);
-  } catch (err) {
-    // Log but don't hard-fail — we still mark it revoked in the DB
-    console.error("[provisioner] Failed to remove API key from keys file:", err);
+  if (!keysFile) {
+    console.warn("[provisioner] VLLM_KEYS_FILE is not set — skipping keys file cleanup on revoke.");
+  } else {
+    try {
+      await removeLine(keysFile, grant.apiKey);
+    } catch (err) {
+      // Log but don't hard-fail — we still mark it revoked in the DB
+      console.error("[provisioner] Failed to remove API key from keys file:", err);
+    }
   }
 
   await prisma.apiKeyGrant.update({
