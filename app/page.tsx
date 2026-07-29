@@ -1,7 +1,7 @@
+import { redirect } from "next/navigation";
+
+// Root route — redirect to login. Middleware will forward authenticated
+// users onward to /dashboard if they already have a valid session.
 export default function Home() {
-  return (
-    <main className="flex min-h-screen items-center justify-center">
-      <h1 className="text-2xl font-bold">LabTimeShare</h1>
-    </main>
-  );
+  redirect("/login");
 }

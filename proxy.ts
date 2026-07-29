@@ -14,6 +14,14 @@ export async function proxy(request: NextRequest) {
   const token = request.cookies.get(COOKIE_NAME)?.value ?? null;
   const payload = token ? await verifyJwt(token) : null;
 
+  // Redirect root — logged-in users go to dashboard, everyone else to login
+  if (pathname === "/") {
+    if (payload) {
+      return NextResponse.redirect(new URL("/dashboard", request.url));
+    }
+    return NextResponse.redirect(new URL("/login", request.url));
+  }
+
   // Redirect logged-in users away from auth pages
   if (pathname === "/login" || pathname === "/register") {
     if (payload) {
@@ -42,5 +50,5 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/admin/:path*", "/login", "/register"],
+  matcher: ["/", "/dashboard/:path*", "/admin/:path*", "/login", "/register"],
 };
