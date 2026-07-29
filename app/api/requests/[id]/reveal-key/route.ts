@@ -42,11 +42,15 @@ export async function POST(
 
   const keyToReturn = shellGrant.sshPrivateKey;
 
-  // Null out the private key — one-time reveal
+  // Null out the private key — one-time reveal (password stays in DB for reference)
   await prisma.shellGrant.update({
     where: { id: shellGrant.id },
     data: { sshPrivateKey: null },
   });
 
-  return NextResponse.json({ sshPrivateKey: keyToReturn });
+  return NextResponse.json({
+    sshPrivateKey: keyToReturn,
+    initialPassword: shellGrant.initialPassword ?? null,
+    linuxUsername: shellGrant.linuxUsername,
+  });
 }

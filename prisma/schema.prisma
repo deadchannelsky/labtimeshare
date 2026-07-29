@@ -80,14 +80,15 @@ model ApiKeyGrant {
 }
 
 model ShellGrant {
-  id           String    @id @default(cuid())
-  requestId    String    @unique
+  id            String    @id @default(cuid())
+  requestId     String    @unique
   linuxUsername String
   sshPublicKey  String
   sshPrivateKey String?
-  isActive     Boolean   @default(true)
-  createdAt    DateTime  @default(now())
-  revokedAt    DateTime?
+  initialPassword String?
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  revokedAt     DateTime?
 
   request AccessRequest @relation(fields: [requestId], references: [id])
 }

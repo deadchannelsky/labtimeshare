@@ -17,6 +17,7 @@ import { promisify } from "util";
 import * as fs from "fs/promises";
 import * as os from "os";
 import * as path from "path";
+import * as crypto from "crypto";
 import { v4 as uuidv4 } from "uuid";
 import { prisma } from "@/lib/prisma";
 import { writeAuditLog } from "@/lib/audit";
@@ -231,6 +232,24 @@ export async function provisionShellAccess(requestId: string): Promise<void> {
     throw new Error(`Shell provisioning failed: could not set up SSH authorized_keys`);
   }
 
+  // Generate a random password and set it on the account
+  // Format: 3 groups of 4 alphanumeric chars separated by hyphens — readable but strong enough for a temp account
+  const initialPassword = [
+    crypto.randomBytes(3).toString("hex"),
+    crypto.randomBytes(3).toString("hex"),
+    crypto.randomBytes(3).toString("hex"),
+  ].join("-");
+
+  try {
+    await execAsync(
+      `echo '${linuxUsername}:${initialPassword}' | sudo chpasswd`,
+      { timeout: 10_000 }
+    );
+  } catch (err) {
+    // Non-fatal: SSH key auth still works. Log and continue.
+    console.error("[provisioner] chpasswd failed:", err);
+  }
+
   const now = new Date();
   const expiresAt = new Date(
     now.getTime() + request.requestedDurationHours * 60 * 60 * 1000
@@ -242,6 +261,7 @@ export async function provisionShellAccess(requestId: string): Promise<void> {
       linuxUsername,
       sshPublicKey: keypair.publicKey,
       sshPrivateKey: keypair.privateKey,
+      initialPassword,
       isActive: true,
     },
   });

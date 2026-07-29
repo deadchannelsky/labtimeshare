@@ -208,11 +208,14 @@ export default async function DashboardPage() {
                       {/* SSH private key reveal */}
                       {keyAlreadyRevealed ? (
                         <div className="bg-yellow-50 border border-yellow-200 rounded p-3 text-xs text-yellow-800">
-                          SSH private key has already been revealed and is no
-                          longer stored. Use your saved key to connect.
+                          SSH private key has already been revealed and deleted. Use your saved key or password to connect.
                         </div>
                       ) : (
-                        <RevealKeyButton requestId={req.id} />
+                        <RevealKeyButton
+                          requestId={req.id}
+                          linuxUsername={req.shellGrant.linuxUsername}
+                          serverIp={serverIp}
+                        />
                       )}
                       {req.expiresAt && (
                         <p className="text-xs text-gray-400">
