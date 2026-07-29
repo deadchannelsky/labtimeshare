@@ -7,7 +7,7 @@ export async function writeAuditLog({
   targetType,
   metadata,
 }: {
-  actorId: string;
+  actorId?: string | null;
   action: string;
   targetId?: string;
   targetType?: string;
@@ -15,7 +15,7 @@ export async function writeAuditLog({
 }): Promise<void> {
   await prisma.auditLog.create({
     data: {
-      actorId,
+      actorId: actorId ?? undefined,
       action,
       targetId,
       targetType,

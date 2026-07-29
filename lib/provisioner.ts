@@ -23,8 +23,8 @@ import { writeAuditLog } from "@/lib/audit";
 
 const execAsync = promisify(exec);
 
-// System actor ID for provisioner-initiated audit log entries
-const SYSTEM_ACTOR = "system";
+// Automated provisioner actions have no human actor — actorId is null
+const SYSTEM_ACTOR = null;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

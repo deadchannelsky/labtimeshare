@@ -94,12 +94,12 @@ model ShellGrant {
 
 model AuditLog {
   id         String   @id @default(cuid())
-  actorId    String
+  actorId    String?
   action     String
   targetId   String?
   targetType String?
   metadata   String?
   createdAt  DateTime @default(now())
 
-  actor User @relation("ActorLogs", fields: [actorId], references: [id])
+  actor User? @relation("ActorLogs", fields: [actorId], references: [id])
 }

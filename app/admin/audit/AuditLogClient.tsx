@@ -195,7 +195,7 @@ export default function AuditLogClient() {
                       {formatDate(entry.createdAt)}
                     </td>
                     <td className="px-4 py-3 font-mono text-xs text-gray-700">
-                      {entry.actor?.username ?? entry.actorId}
+                      {entry.actor?.username ?? entry.actorId ?? "system"}
                     </td>
                     <td className="px-4 py-3">
                       <span
