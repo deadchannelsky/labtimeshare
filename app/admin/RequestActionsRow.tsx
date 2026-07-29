@@ -42,12 +42,19 @@ function isExpired(row: RequestRow): boolean {
 
 type PanelMode = "approve" | "deny" | "extend" | null;
 
-export default function RequestActionsRow({ row }: { row: RequestRow }) {
+export default function RequestActionsRow({
+  row,
+  colSpan,
+  children,
+}: {
+  row: RequestRow;
+  colSpan: number;
+  /** Render-prop: receives the action buttons node, must render a <tr> */
+  children: (buttons: React.ReactNode) => React.ReactNode;
+}) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [panel, setPanel] = useState<PanelMode>(null);
-
-  // Form values
   const [durationOverride, setDurationOverride] = useState("");
   const [denyNotes, setDenyNotes] = useState("");
   const [extendHours, setExtendHours] = useState("");
@@ -158,8 +165,8 @@ export default function RequestActionsRow({ row }: { row: RequestRow }) {
     }
   }
 
-  // ── Button bar (lives in the Actions <td>) ─────────────────────────────────
-  const buttons = () => {
+  // ── Action buttons rendered inside the parent's <td> ──────────────────────
+  const buttons: React.ReactNode = (() => {
     if (row.status === "PENDING") {
       return (
         <div className="flex items-center gap-2 justify-end">
@@ -217,10 +224,10 @@ export default function RequestActionsRow({ row }: { row: RequestRow }) {
       );
     }
     return <span className="block text-right text-xs text-gray-400">—</span>;
-  };
+  })();
 
-  // ── Expanded panel content (rendered as a separate <tr> by the table) ──────
-  const panelContent = () => {
+  // ── Panel content rendered as a full-width <tr> beneath the data row ──────
+  const panelContent: React.ReactNode = (() => {
     if (panel === "approve") {
       return (
         <div className="flex flex-wrap items-end gap-4 p-4">
@@ -330,7 +337,23 @@ export default function RequestActionsRow({ row }: { row: RequestRow }) {
       );
     }
     return null;
-  };
+  })();
 
-  return { buttons, panelContent, hasPanel: panel !== null };
+  return (
+    <>
+      {/* Data row — rendered via render-prop so parent controls all <td>s */}
+      {children(buttons)}
+
+      {/* Panel row — full-width, only rendered when a panel is open */}
+      {panelContent && (
+        <tr className="bg-gray-50">
+          <td colSpan={colSpan} className="px-0 py-0">
+            <div className="border-t border-gray-200">
+              {panelContent}
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
+  );
 }
