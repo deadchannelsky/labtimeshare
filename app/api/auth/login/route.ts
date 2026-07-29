@@ -73,9 +73,11 @@ export async function POST(request: NextRequest) {
   });
 
   const response = NextResponse.json({ ok: true }, { status: 200 });
+  // secure: true — site is served over HTTPS via Cloudflare/nginx.
+  // Do NOT set domain: the browser will scope it to the request host automatically.
   response.cookies.set(COOKIE_NAME, token, {
     httpOnly: true,
-    secure: false,
+    secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
     path: "/",
     maxAge: 86400,

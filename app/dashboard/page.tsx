@@ -89,6 +89,14 @@ export default async function DashboardPage() {
             <p className="text-sm text-gray-500">Welcome, {session.username}</p>
           </div>
           <div className="flex items-center gap-3">
+            {(session.role === "ADMIN" || session.role === "APPROVER") && (
+              <Link
+                href="/admin/users"
+                className="text-sm font-medium text-gray-600 hover:text-gray-900 border border-gray-300 px-3 py-2 rounded-md hover:bg-gray-50 transition-colors"
+              >
+                Admin Panel
+              </Link>
+            )}
             <Link
               href="/dashboard/request"
               className="bg-blue-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-blue-700 transition-colors"
