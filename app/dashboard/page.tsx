@@ -160,6 +160,56 @@ export default async function DashboardPage() {
                           {req.apiKeyGrant.apiKey}
                         </code>
                       </div>
+                      {/* Endpoint info */}
+                      <div className="space-y-1">
+                        <p className="text-xs text-gray-500 mb-1">Base URL</p>
+                        <code className="block bg-gray-50 border border-gray-200 rounded px-3 py-2 text-xs font-mono break-all">
+                          https://api.innovationstudiodc.com/v1
+                        </code>
+                      </div>
+                      {/* Usage instructions */}
+                      <div className="bg-blue-50 border border-blue-200 rounded p-3 space-y-2">
+                        <p className="text-xs font-semibold text-blue-800">
+                          OpenAI-compatible endpoint
+                        </p>
+                        <p className="text-xs text-blue-700">
+                          Use this key anywhere the OpenAI SDK or API is supported. Set your client&apos;s <code className="font-mono">base_url</code> to the URL above and pass your key as the bearer token.
+                        </p>
+                        <div className="space-y-1">
+                          <p className="text-xs font-medium text-blue-800">Python</p>
+                          <pre className="bg-white border border-blue-100 rounded px-2 py-1.5 text-xs font-mono overflow-x-auto whitespace-pre">{`from openai import OpenAI
+
+client = OpenAI(
+    base_url="https://api.innovationstudiodc.com/v1",
+    api_key="${req.apiKeyGrant.apiKey}",
+)
+
+response = client.chat.completions.create(
+    model="<model-name>",
+    messages=[{"role": "user", "content": "Hello"}],
+)
+print(response.choices[0].message.content)`}</pre>
+                        </div>
+                        <div className="space-y-1">
+                          <p className="text-xs font-medium text-blue-800">curl</p>
+                          <pre className="bg-white border border-blue-100 rounded px-2 py-1.5 text-xs font-mono overflow-x-auto whitespace-pre">{`curl https://api.innovationstudiodc.com/v1/chat/completions \\
+  -H "Authorization: Bearer ${req.apiKeyGrant.apiKey}" \\
+  -H "Content-Type: application/json" \\
+  -d '{"model":"<model-name>","messages":[{"role":"user","content":"Hello"}]}'`}</pre>
+                        </div>
+                        <p className="text-xs text-blue-600">
+                          See{" "}
+                          <a
+                            href="https://platform.openai.com/docs/api-reference"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="underline"
+                          >
+                            OpenAI API reference
+                          </a>{" "}
+                          for the full list of supported endpoints.
+                        </p>
+                      </div>
                       {req.expiresAt && (
                         <p className="text-xs text-gray-400">
                           Expires {formatDate(req.expiresAt)}
