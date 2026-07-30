@@ -58,7 +58,7 @@ Admin may extend any active grant at any time
 - `User` — id, email, username, passwordHash, role (`USER` | `APPROVER` | `ADMIN`), status (`PENDING` | `ACTIVE` | `DISABLED`), createdAt
 - `AccessRequest` — id, userId, path (`API_KEY` | `SHELL_ACCESS`), status (`PENDING` | `APPROVED` | `DENIED` | `REVOKED`), requestedDurationHours, grantedAt, expiresAt, reviewedBy, reviewedAt, notes, createdAt
 - `ApiKeyGrant` — id, requestId, apiKey (UUID), isActive, createdAt, revokedAt
-- `ShellGrant` — id, requestId, linuxUsername, sshPublicKey, sshPrivateKey (shown once), isActive, createdAt, revokedAt
+- `ShellGrant` — id, requestId, linuxUsername, sshPublicKey, sshPrivateKey (persisted, shown once in UI but retained in DB for web terminal use), isActive, createdAt, revokedAt
 - `AuditLog` — id, actorId, action, targetId, targetType, metadata (JSON), createdAt
 
 **Relevant Context:** None yet — greenfield project.
@@ -117,7 +117,7 @@ Admin may extend any active grant at any time
 **Relevant Context:**
 - Sub-Tasks 1 and 2 must be complete
 - Server IP displayed in credentials panel should come from an env var `SERVER_IP`
-- SSH private key is stored in `ShellGrant.sshPrivateKey` — display it once and prompt user to copy it
+- SSH private key is stored in `ShellGrant.sshPrivateKey` — display it once and prompt user to copy it; the key is retained in the DB (not nulled) so the web terminal can use it for the lifetime of the grant
 
 **Status:** `[x] done`
 
@@ -294,12 +294,50 @@ PORT=3000
 
 ---
 
+### Sub-Task 10 — Web SSH Terminal (xterm.js + WebSocket + ssh2)
+
+**Intent:** Add an in-browser SSH terminal to the portal so that users with an active `ShellGrant` can open a live shell session directly from the dashboard, tunneled through the same Cloudflare origin. The private key never leaves the server — the portal authenticates to SSHD on the user's behalf using the key stored in `ShellGrant.sshPrivateKey`. The existing one-time credential reveal flow in `RevealKeyButton.tsx` is preserved as a display-only operation (the key is no longer nulled out after reveal). The web terminal is available for the full lifetime of the grant regardless of whether the user has previously viewed their credentials.
+
+**Expected Outcomes:**
+- A custom `server.ts` at the project root replaces `next start` as the entry point. It creates a Node HTTP server, mounts the Next.js request handler for all HTTP traffic, and attaches a `ws.Server` to handle WebSocket upgrade requests on the same port. All other behavior of the app is identical.
+- A `lib/terminalSession.ts` module manages the lifecycle of a single terminal session: validates the JWT from the WS handshake cookie, confirms the requesting user owns the named `ShellGrant`, opens an `ssh2` `Client` connection to `localhost:22` using the grant's stored private key, and pipes data bidirectionally between the WebSocket and the SSH shell stream. On WS close, SSH close, or grant expiry the session tears down cleanly.
+- An `app/dashboard/terminal/[grantId]/page.tsx` page renders an xterm.js terminal component that connects to `ws[s]://<origin>/api/terminal/<grantId>`. This page is reachable from the active Shell Access grant card on the existing dashboard via an "Open Terminal" button.
+- The `ShellGrant` expiry path in `lib/expiryJob.ts` gains a lightweight session registry call that closes any open terminal session for a grant at the moment it is revoked or expires.
+- `package.json` `start` script changes from `next start` to `node server.js` (compiled output of `server.ts`). The `lts-portal.service` systemd unit `ExecStart` line is updated to match.
+
+**Todo List:**
+1. Install new dependencies: `ws` + `@types/ws`, `ssh2` + `@types/ssh2`, `@xterm/xterm`, `@xterm/addon-fit`, `@xterm/addon-attach`
+1a. **Remove the key-nulling behaviour:** In `app/api/requests/[id]/reveal-key/route.ts` remove the `prisma.shellGrant.update({ data: { sshPrivateKey: null } })` call (currently line 48). The route should return the key value without modifying the DB record. Update `prisma/schema.prisma` to make `sshPrivateKey` non-nullable (`String` not `String?`) and create a new migration that backfills any existing null rows with a placeholder or drops the nullable constraint. Update `app/dashboard/page.tsx` line 174 which currently checks `shellGrant.sshPrivateKey === null` to determine `alreadyRevealed` — replace that flag with a `revealedAt` timestamp field on `ShellGrant` or simply remove the already-revealed guard entirely since the key persists.
+2. Create `server.ts` at project root — instantiate a Node `http.createServer`, pass all non-upgrade requests to the Next.js `createServer` handler (import via `next`), attach `ws.Server({ noServer: true })` and handle the HTTP `upgrade` event routing `/api/terminal/:grantId` paths to the WS server; start the cron job here if moving startup logic from `instrumentation.ts` (or leave `instrumentation.ts` as-is since it still fires in the Node runtime)
+3. Create `lib/terminalSession.ts` — export a `handleTerminalUpgrade(ws, grantId, cookieHeader)` function that: (a) extracts and verifies the `lts-session` JWT using the existing `verifyJwt` from `lib/auth.ts`; (b) queries the DB for the `ShellGrant` where `id = grantId`, confirms `isActive = true`, confirms `request.userId = session.userId`; (c) instantiates `ssh2.Client`, connects to `127.0.0.1:22` with `username: grant.linuxUsername` and `privateKey: grant.sshPrivateKey`; (d) on `ready`, opens a shell stream with a pty, sets initial terminal dimensions from a `resize` message; (e) pipes WS messages → SSH stream and SSH stream data → WS; (f) on either side closing, tears down the other; (g) exports a `closeSession(grantId)` function for the expiry job to call
+4. Create `lib/sessionRegistry.ts` — a simple in-memory `Map<grantId, WebSocket>` with `register(grantId, ws)` and `closeAndDeregister(grantId)` functions. `terminalSession.ts` registers on connect and deregisters on close. `closeAndDeregister` is what the expiry job calls.
+5. Update `lib/expiryJob.ts` — after revoking a `ShellGrant`, call `closeAndDeregister(grant.id)` from the session registry so any open browser terminal is dropped at the exact moment access expires
+6. Create `app/dashboard/terminal/[grantId]/page.tsx` — a `"use client"` page that: (a) constructs the WebSocket URL from `window.location` (so it works both ws:// and wss://); (b) initialises an `xterm.js` `Terminal` instance with `FitAddon` and `AttachAddon`; (c) attaches the terminal to a `div` ref; (d) connects the `AttachAddon` to the WebSocket; (e) sends a JSON `resize` message on terminal resize events; (f) cleans up on unmount
+7. Add an "Open Terminal" button to the active Shell Access grant card in `app/dashboard/page.tsx` — renders only when `grant.isActive = true`; links to `/dashboard/terminal/[grantId]`
+8. Update `package.json` start script from `next start` to the compiled `server.ts` output command (e.g. `node --require ts-node/register server.ts` for dev, compiled `node server.js` for prod); update `next.config.ts` if needed for custom server compatibility
+9. Update `lts-portal.service` `ExecStart` to invoke the new server entry point instead of `next start`
+
+**Relevant Context:**
+- `proxy.ts` exports the middleware function and `config.matcher` — this is the Next.js middleware file (named `proxy.ts` not `middleware.ts`; Next.js picks it up via the export). The WebSocket upgrade path `/api/terminal/*` does **not** need to be added to `config.matcher` because the upgrade event is intercepted at the raw HTTP server level before Next.js sees it.
+- `lib/auth.ts` exports `verifyJwt(token: string): Promise<SessionPayload | null>` — reuse this directly in `terminalSession.ts` to validate the cookie from the WS handshake headers.
+- `ShellGrant.sshPrivateKey` — changed from nullable (`String?`) to required (`String`) as part of this sub-task. The key is retained in the DB for the full lifetime of the grant. The `reveal-key` API route no longer nulls it out; it only returns the value. The "Open Terminal" button is available as long as `isActive = true`.
+- `ShellGrant.linuxUsername` — the OS username used for the ssh2 connection target.
+- `instrumentation.ts` starts `expiryJob` — this still fires in the Node runtime when running under a custom server, so no change is needed there unless startup logic needs to move.
+- The `sshPrivateKey` field on `ShellGrant` stores an ed25519 private key in OpenSSH format (generated by `ssh-keygen -t ed25519` in `lib/provisioner.ts`). The `ssh2` client accepts this directly in the `privateKey` option of `client.connect()`.
+- xterm.js v5+ is published under the `@xterm/xterm` scoped package. Use `@xterm/addon-fit` for terminal resize handling and `@xterm/addon-attach` for the WebSocket pipe (it handles binary/text framing automatically).
+- Terminal resize messages should be a JSON envelope, e.g. `{ type: "resize", cols: N, rows: N }`, sent from the client; `terminalSession.ts` detects this message type and calls `stream.setWindow(rows, cols, 0, 0)` on the SSH pty stream rather than passing it to the shell.
+
+**Status:** `[x] done`
+
+---
+
 ## Implementation Order
 
 ```
-1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9
+1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10
 ```
 
 Sub-Tasks 3, 4, and 5 can be worked in parallel after Sub-Task 2.
 Sub-Task 6 must precede Sub-Task 7.
-Sub-Task 9 is last.
+Sub-Task 9 is last among the original tasks.
+Sub-Task 10 depends on Sub-Tasks 1–9 being complete (requires active ShellGrant records, auth system, dashboard, provisioner, and expiry job).

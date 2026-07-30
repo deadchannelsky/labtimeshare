@@ -170,8 +170,6 @@ export default async function DashboardPage() {
                 }
 
                 if (req.path === "SHELL_ACCESS" && req.shellGrant) {
-                  const keyAlreadyRevealed =
-                    req.shellGrant.sshPrivateKey === null;
                   return (
                     <div
                       key={req.id}
@@ -206,17 +204,18 @@ export default async function DashboardPage() {
                         </div>
                       </div>
                       {/* SSH private key reveal */}
-                      {keyAlreadyRevealed ? (
-                        <div className="bg-yellow-50 border border-yellow-200 rounded p-3 text-xs text-yellow-800">
-                          SSH private key has already been revealed and deleted. Use your saved key or password to connect.
-                        </div>
-                      ) : (
-                        <RevealKeyButton
-                          requestId={req.id}
-                          linuxUsername={req.shellGrant.linuxUsername}
-                          serverIp={serverIp}
-                        />
-                      )}
+                      <RevealKeyButton
+                        requestId={req.id}
+                        linuxUsername={req.shellGrant.linuxUsername}
+                        serverIp={serverIp}
+                      />
+                      {/* Web terminal */}
+                      <Link
+                        href={`/dashboard/terminal/${req.shellGrant.id}`}
+                        className="inline-flex items-center gap-1.5 text-xs font-medium text-white bg-gray-800 hover:bg-gray-700 px-3 py-1.5 rounded transition-colors"
+                      >
+                        <span>⌨</span> Open Terminal
+                      </Link>
                       {req.expiresAt && (
                         <p className="text-xs text-gray-400">
                           Expires {formatDate(req.expiresAt)}

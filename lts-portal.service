@@ -15,7 +15,7 @@ WorkingDirectory=/opt/labtimeshare
 EnvironmentFile=/opt/labtimeshare/.env
 
 # Path to the node binary — adjust if using nvm or a custom install location
-ExecStart=/usr/bin/node /opt/labtimeshare/node_modules/.bin/next start
+ExecStart=/usr/bin/node /opt/labtimeshare/server.js
 
 # Restart policy
 Restart=on-failure

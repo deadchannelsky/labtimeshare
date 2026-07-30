@@ -84,7 +84,7 @@ model ShellGrant {
   requestId     String    @unique
   linuxUsername String
   sshPublicKey  String
-  sshPrivateKey String?
+  sshPrivateKey String
   initialPassword String?
   isActive      Boolean   @default(true)
   createdAt     DateTime  @default(now())

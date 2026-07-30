@@ -36,3 +36,10 @@ yarn-error.log*
 .claude/
 .windsurf/
 skills-lock.json
+
+# Compiled server entry point (produced by tsc --project tsconfig.server.json)
+server.js
+tsconfig.server.tsbuildinfo
+
+# Compiled lib output (tsc side-effect — only server.ts is the intended output)
+lib/*.js

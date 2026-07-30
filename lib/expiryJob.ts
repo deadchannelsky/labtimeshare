@@ -12,6 +12,7 @@ import cron from "node-cron";
 import { prisma } from "@/lib/prisma";
 import { revokeApiKey, revokeShellAccess } from "@/lib/provisioner";
 import { writeAuditLog } from "@/lib/audit";
+import { closeAndDeregister } from "@/lib/sessionRegistry";
 
 const SYSTEM_ACTOR = "system";
 
@@ -79,6 +80,7 @@ export async function runExpiryCheck(): Promise<void> {
   // Revoke expired shell access grants
   for (const grant of expiredShellGrants) {
     try {
+      closeAndDeregister(grant.id);
       await revokeShellAccess(grant.id);
       await prisma.accessRequest.update({
         where: { id: grant.requestId },
