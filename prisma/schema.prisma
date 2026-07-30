@@ -1,8 +1,9 @@
 // Prisma schema for LabTimeShare — GPU Access Self-Service Portal
 
 generator client {
-  provider = "prisma-client"
-  output   = "../generated/prisma"
+  provider     = "prisma-client"
+  output       = "../generated/prisma"
+  moduleFormat = "cjs"
 }
 
 datasource db {

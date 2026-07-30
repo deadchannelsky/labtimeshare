@@ -43,3 +43,6 @@ tsconfig.server.tsbuildinfo
 
 # Compiled lib output (tsc side-effect — only server.ts is the intended output)
 lib/*.js
+
+# Compiled Prisma client output (produced by tsc --project tsconfig.prisma-client.json)
+tsconfig.prisma-client.tsbuildinfo

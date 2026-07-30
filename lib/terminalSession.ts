@@ -13,9 +13,9 @@
 
 import { Client as SshClient } from "ssh2";
 import type { WebSocket } from "ws";
-import { prisma } from "@/lib/prisma";
-import { verifyJwt } from "@/lib/auth";
-import { registerSession, deregisterSession } from "@/lib/sessionRegistry";
+import { prisma } from "./prisma";
+import { verifyJwt } from "./auth";
+import { registerSession, deregisterSession } from "./sessionRegistry";
 
 // Default pty dimensions — overridden by the first resize message from the client.
 const DEFAULT_COLS = 220;

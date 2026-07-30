@@ -4,7 +4,7 @@
   "description": "GPU Access Self-Service Portal",
   "scripts": {
     "dev": "next dev",
-    "build": "next build && tsc --project tsconfig.server.json",
+    "build": "next build && tsc --project tsconfig.prisma-client.json && tsc --project tsconfig.server.json",
     "start": "node server.js",
     "lint": "next lint",
     "test": "echo \"Error: no test specified\" && exit 1"
