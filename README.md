@@ -201,11 +201,81 @@ Configure your vLLM router to read this file as its permitted API keys source. W
 
 ---
 
+## Account Cleanup & Retention Policy
+
+The portal provides comprehensive account lifecycle management with automatic and manual cleanup options:
+
+### SSH Key Revocation
+
+When a shell access grant is revoked (either manually or via auto-expiry):
+1. All SSH public keys are explicitly marked as revoked in the database (for audit purposes)
+2. The account is locked: `usermod -L` prevents password-based authentication
+3. The `authorized_keys` file is cleared, preventing key-based authentication
+4. All revocation steps are recorded in the detailed audit trail with timestamps and status
+
+This multi-layered approach ensures immediate access revocation while maintaining a complete audit record.
+
+### Account Deletion Policy
+
+Revoked shell accounts can be automatically or manually deleted. When approving a shell access request, admins can set an auto-delete policy:
+
+- **Manual only (default)** — revoked accounts persist indefinitely; must be manually deleted via admin panel
+- **Delete on revocation (0 days)** — account deleted immediately upon revocation
+- **Delayed deletion (N days)** — account deleted automatically N days after revocation (e.g., 7, 30, 90 days)
+
+### Auto-Cleanup Job
+
+A background job runs every `CLEANUP_CHECK_INTERVAL_MINUTES` (default: 60) to automatically delete accounts past their retention window:
+
+1. Finds all revoked accounts (isActive=false, deletedAt=null) with an auto-delete policy set
+2. Checks if `revokedAt + autoDeleteAfterDays` is in the past
+3. Deletes the OS user account (`userdel -r`) and removes the home directory
+4. Marks the grant as deleted in the database (soft-delete for audit trail)
+5. Logs each deletion to the detailed audit trail
+
+### Manual Account Deletion
+
+Admins/approvers can immediately delete a revoked account via:
+- **Admin Panel**: Click "Delete Account" on any revoked shell access grant
+- **API**: `POST /api/admin/grants/{id}/delete` with `{ "grantType": "SHELL_ACCESS" }`
+
+Manual deletion requires:
+- User has ADMIN or APPROVER role
+- Grant exists and is shell access type
+- Grant is revoked (isActive = false)
+
+### Audit Trail for Deletions
+
+Every account deletion is logged with detailed steps:
+- **ssh_keys_revoked** — SSH public keys marked as revoked
+- **account_locked** — Linux account locked via usermod
+- **authorized_keys_cleared** — SSH key file cleared
+- **os_account_deleted** — OS user and home directory deleted via userdel
+- **db_marked_deleted** — Database grant marked with deletedAt timestamp
+
+Each step records success/failure status with error messages if applicable.
+
+### Configuration
+
+```env
+# How often to check for expired access grants (default: 5 minutes)
+EXPIRY_CHECK_INTERVAL_MINUTES=5
+
+# How often to check for revoked accounts ready for deletion (default: 60 minutes)
+# Set to 0 to disable auto-cleanup
+CLEANUP_CHECK_INTERVAL_MINUTES=60
+```
+
+---
+
 ## Security Notes
 
 - All SSH access is VPN-only — no public SSH exposure
-- SSH private keys are shown once in the portal UI and then deleted from the database
-- Revoked shell accounts are locked (`usermod -L`) and their `authorized_keys` is cleared
+- SSH private keys are shown once in the portal UI and then retained for web terminal use (accessible via authenticated portal only)
+- SSH keys are explicitly tracked by fingerprint and marked as revoked upon account revocation
+- Revoked shell accounts are locked (`usermod -L`), have their `authorized_keys` cleared, and can be permanently deleted
 - Expired grants are auto-revoked by a background job running every 5 minutes (configurable)
+- Revoked accounts are automatically deleted based on configurable retention policy (manual only by default)
+- All account revocation and deletion steps are recorded in detailed audit trail with timestamps and status
 - Passwords are hashed with Argon2id
 - Sessions use HTTP-only JWT cookies (24-hour expiry)

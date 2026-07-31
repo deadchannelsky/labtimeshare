@@ -19,6 +19,7 @@ type ShellGrantRow = {
   isActive: boolean;
   createdAt: string;
   revokedAt: string | null;
+  deletedAt: string | null;
 };
 
 export type RequestRow = {
@@ -40,7 +41,7 @@ function isExpired(row: RequestRow): boolean {
   return new Date(row.expiresAt) < new Date();
 }
 
-type PanelMode = "approve" | "deny" | "extend" | null;
+type PanelMode = "approve" | "deny" | "extend" | "delete" | null;
 
 export default function RequestActionsRow({
   row,
@@ -58,6 +59,7 @@ export default function RequestActionsRow({
   const [durationOverride, setDurationOverride] = useState("");
   const [denyNotes, setDenyNotes] = useState("");
   const [extendHours, setExtendHours] = useState("");
+  const [autoDeleteAfterDays, setAutoDeleteAfterDays] = useState<string | null>(null);
 
   const expired = isExpired(row);
   const isActiveGrant =
@@ -75,9 +77,18 @@ export default function RequestActionsRow({
   async function handleApprove() {
     setBusy(true);
     try {
-      const body: { durationHours?: number } = {};
+      const body: { durationHours?: number; autoDeleteAfterDays?: number | null } = {};
       const parsed = parseInt(durationOverride, 10);
       if (!isNaN(parsed) && parsed > 0) body.durationHours = parsed;
+      
+      // Add auto-delete policy if provided (only for shell access)
+      if (row.path === "SHELL_ACCESS" && autoDeleteAfterDays !== null) {
+        const policyValue = parseInt(autoDeleteAfterDays, 10);
+        if (!isNaN(policyValue) && policyValue >= 0) {
+          body.autoDeleteAfterDays = policyValue;
+        }
+      }
+      
       const res = await fetch(`/api/admin/requests/${row.id}/approve`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -165,6 +176,28 @@ export default function RequestActionsRow({
     }
   }
 
+  async function handleDelete() {
+    if (!confirm("This will permanently delete the Linux account and home directory.\n\nThis cannot be undone. Are you sure?")) return;
+    const grantId = row.shellGrant?.id;
+    if (!grantId) return;
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/admin/grants/${grantId}/delete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ grantType: "SHELL_ACCESS" }),
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => null)) as { error?: string } | null;
+        alert(data?.error ?? "Failed to delete account.");
+        return;
+      }
+      router.refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
+
   // ── Action buttons rendered inside the parent's <td> ──────────────────────
   const buttons: React.ReactNode = (() => {
     if (row.status === "PENDING") {
@@ -223,6 +256,25 @@ export default function RequestActionsRow({
         </div>
       );
     }
+    // Show delete button for revoked shell access grants that haven't been deleted yet
+    if (
+      row.status === "REVOKED" &&
+      row.path === "SHELL_ACCESS" &&
+      row.shellGrant &&
+      row.shellGrant.isActive === false &&
+      !row.shellGrant.deletedAt // Show only if not already deleted
+    ) {
+      return (
+        <button
+          type="button"
+          onClick={() => void handleDelete()}
+          disabled={busy}
+          className="rounded-md border border-orange-400 px-3 py-1.5 text-sm font-medium text-orange-700 hover:bg-orange-50 disabled:opacity-50"
+        >
+          {busy ? "Deleting…" : "Delete Account"}
+        </button>
+      );
+    }
     return <span className="block text-right text-xs text-gray-400">—</span>;
   })();
 
@@ -230,21 +282,79 @@ export default function RequestActionsRow({
   const panelContent: React.ReactNode = (() => {
     if (panel === "approve") {
       return (
-        <div className="flex flex-wrap items-end gap-4 p-4">
-          <div>
-            <label className="mb-1 block text-xs font-medium text-gray-600">
-              Duration override (hours)
-            </label>
-            <input
-              type="number"
-              min={1}
-              placeholder={`Default: ${row.requestedDurationHours}h`}
-              value={durationOverride}
-              onChange={(e) => setDurationOverride(e.target.value)}
-              className="w-44 rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
-            />
+        <div className="space-y-4 p-4">
+          <div className="flex flex-wrap items-end gap-4">
+            <div>
+              <label className="mb-1 block text-xs font-medium text-gray-600">
+                Duration override (hours)
+              </label>
+              <input
+                type="number"
+                min={1}
+                placeholder={`Default: ${row.requestedDurationHours}h`}
+                value={durationOverride}
+                onChange={(e) => setDurationOverride(e.target.value)}
+                className="w-44 rounded-md border border-gray-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-green-400"
+              />
+            </div>
           </div>
-          <div className="flex items-center gap-2">
+
+          {/* Auto-delete policy selector for shell access */}
+          {row.path === "SHELL_ACCESS" && (
+            <div className="border-t border-gray-200 pt-4">
+              <label className="mb-2 block text-xs font-medium text-gray-700">
+                Auto-delete account after revocation (optional)
+              </label>
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="autoDelete"
+                    value="null"
+                    checked={autoDeleteAfterDays === null}
+                    onChange={() => setAutoDeleteAfterDays(null)}
+                    className="rounded"
+                  />
+                  <span className="text-sm text-gray-700">Manual only</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="autoDelete"
+                    value="0"
+                    checked={autoDeleteAfterDays === "0"}
+                    onChange={() => setAutoDeleteAfterDays("0")}
+                    className="rounded"
+                  />
+                  <span className="text-sm text-gray-700">Delete on revocation</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="autoDelete"
+                    value="7"
+                    checked={autoDeleteAfterDays === "7"}
+                    onChange={() => setAutoDeleteAfterDays("7")}
+                    className="rounded"
+                  />
+                  <span className="text-sm text-gray-700">Delete after 7 days</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="autoDelete"
+                    value="30"
+                    checked={autoDeleteAfterDays === "30"}
+                    onChange={() => setAutoDeleteAfterDays("30")}
+                    className="rounded"
+                  />
+                  <span className="text-sm text-gray-700">Delete after 30 days</span>
+                </label>
+              </div>
+            </div>
+          )}
+
+          <div className="flex items-center gap-2 border-t border-gray-200 pt-4">
             <button
               type="button"
               onClick={() => void handleApprove()}

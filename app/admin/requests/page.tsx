@@ -29,6 +29,7 @@ export default async function AdminRequestsPage() {
           isActive: true,
           createdAt: true,
           revokedAt: true,
+          deletedAt: true,
         },
       },
     },
@@ -63,6 +64,7 @@ export default async function AdminRequestsPage() {
           isActive: r.shellGrant.isActive,
           createdAt: r.shellGrant.createdAt.toISOString(),
           revokedAt: r.shellGrant.revokedAt?.toISOString() ?? null,
+          deletedAt: r.shellGrant.deletedAt?.toISOString() ?? null,
         }
       : null,
   }));

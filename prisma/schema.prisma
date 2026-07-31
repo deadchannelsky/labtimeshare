@@ -36,6 +36,11 @@ enum RequestStatus {
   REVOKED
 }
 
+enum AuditLogDetailStatus {
+  SUCCESS
+  FAILED
+}
+
 // ─── Models ───────────────────────────────────────────────────────────────────
 
 model User {
@@ -81,17 +86,22 @@ model ApiKeyGrant {
 }
 
 model ShellGrant {
-  id            String    @id @default(cuid())
-  requestId     String    @unique
-  linuxUsername String
-  sshPublicKey  String
-  sshPrivateKey String
-  initialPassword String?
-  isActive      Boolean   @default(true)
-  createdAt     DateTime  @default(now())
-  revokedAt     DateTime?
+  id                  String    @id @default(cuid())
+  requestId           String    @unique
+  linuxUsername       String
+  sshPublicKey        String
+  sshPrivateKey       String
+  initialPassword     String?
+  isActive            Boolean   @default(true)
+  createdAt           DateTime  @default(now())
+  revokedAt           DateTime?
+  deletedAt           DateTime?
+  autoDeleteAfterDays Int?
+  deleteScheduledAt   DateTime?
+  deleteReason        String?
 
-  request AccessRequest @relation(fields: [requestId], references: [id])
+  request             AccessRequest @relation(fields: [requestId], references: [id])
+  sshKeyRecords       SshKeyRecord[]
 }
 
 model AuditLog {
@@ -103,5 +113,37 @@ model AuditLog {
   metadata   String?
   createdAt  DateTime @default(now())
 
-  actor User? @relation("ActorLogs", fields: [actorId], references: [id])
+  actor      User?             @relation("ActorLogs", fields: [actorId], references: [id], onDelete: SetNull)
+  details    AuditLogDetail[]
+}
+
+model AuditLogDetail {
+  id           String                  @id @default(cuid())
+  auditLogId   String
+  step         String
+  status       AuditLogDetailStatus
+  errorMessage String?
+  metadata     String?
+  createdAt    DateTime                @default(now())
+
+  auditLog     AuditLog                @relation(fields: [auditLogId], references: [id], onDelete: Cascade)
+
+  @@index([auditLogId])
+}
+
+model SshKeyRecord {
+  id           String    @id @default(cuid())
+  shellGrantId String
+  publicKey    String
+  keyType      String
+  fingerprint  String
+  comment      String
+  isRevoked    Boolean   @default(false)
+  revokedAt    DateTime?
+  createdAt    DateTime  @default(now())
+
+  shellGrant   ShellGrant @relation(fields: [shellGrantId], references: [id], onDelete: Cascade)
+
+  @@index([shellGrantId])
+  @@index([fingerprint])
 }

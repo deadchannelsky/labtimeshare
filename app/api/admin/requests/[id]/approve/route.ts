@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { getSession } from "@/lib/session";
 import { writeAuditLog } from "@/lib/audit";
@@ -6,6 +7,11 @@ import {
   provisionApiKey,
   provisionShellAccess,
 } from "@/lib/provisioner";
+
+const ApproveSchema = z.object({
+  durationHours: z.number().optional(),
+  autoDeleteAfterDays: z.number().nullable().optional(),
+});
 
 export async function POST(
   request: NextRequest,
@@ -36,41 +42,61 @@ export async function POST(
     );
   }
 
-  let body: { durationHours?: number } = {};
+  let body: unknown;
   try {
-    const raw = await request.json().catch(() => null);
-    if (raw && typeof raw === "object") {
-      body = raw as { durationHours?: number };
-    }
+    body = await request.json().catch(() => null);
   } catch {
-    // empty body is fine
+    body = null;
   }
 
-  // If caller provides a duration override, update requestedDurationHours first
-  if (typeof body.durationHours === "number" && body.durationHours > 0) {
-    await prisma.accessRequest.update({
-      where: { id },
-      data: {
-        requestedDurationHours: body.durationHours,
-        reviewedBy: session.userId,
-        reviewedAt: new Date(),
-      },
-    });
-  } else {
-    await prisma.accessRequest.update({
-      where: { id },
-      data: {
-        reviewedBy: session.userId,
-        reviewedAt: new Date(),
-      },
-    });
+  const parsed = ApproveSchema.safeParse(body ?? {});
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Invalid request body" },
+      { status: 400 }
+    );
   }
+
+  const { durationHours, autoDeleteAfterDays } = parsed.data;
+
+  // Prepare update data for AccessRequest
+  const updateData: {
+    requestedDurationHours?: number;
+    reviewedBy: string;
+    reviewedAt: Date;
+  } = {
+    reviewedBy: session.userId,
+    reviewedAt: new Date(),
+  };
+
+  if (typeof durationHours === "number" && durationHours > 0) {
+    updateData.requestedDurationHours = durationHours;
+  }
+
+  await prisma.accessRequest.update({
+    where: { id },
+    data: updateData,
+  });
 
   try {
     if (existing.path === "API_KEY") {
       await provisionApiKey(id);
     } else {
+      // For shell access, also set auto-delete policy if provided
       await provisionShellAccess(id);
+      
+      // Update the shell grant with auto-delete policy if provided
+      if (autoDeleteAfterDays !== undefined) {
+        const shellGrant = await prisma.shellGrant.findUnique({
+          where: { requestId: id },
+        });
+        if (shellGrant && autoDeleteAfterDays !== null) {
+          await prisma.shellGrant.update({
+            where: { id: shellGrant.id },
+            data: { autoDeleteAfterDays: Math.max(0, autoDeleteAfterDays) },
+          });
+        }
+      }
     }
   } catch (err) {
     const message =
@@ -86,8 +112,10 @@ export async function POST(
     targetType: "AccessRequest",
     metadata: {
       path: existing.path,
-      durationHours: body.durationHours ?? existing.requestedDurationHours,
+      durationHours: durationHours ?? existing.requestedDurationHours,
       userId: existing.userId,
+      autoDeleteAfterDays:
+        autoDeleteAfterDays !== undefined ? autoDeleteAfterDays : null,
     },
   });
 

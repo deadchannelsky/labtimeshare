@@ -20,7 +20,7 @@ import * as path from "path";
 import * as crypto from "crypto";
 import { v4 as uuidv4 } from "uuid";
 import { prisma } from "@/lib/prisma";
-import { writeAuditLog } from "@/lib/audit";
+import { writeAuditLog, writeDetailedAuditLog } from "@/lib/audit";
 
 const execAsync = promisify(exec);
 
@@ -31,6 +31,21 @@ const SYSTEM_ACTOR = null;
 
 function getVllmKeysFile(): string | null {
   return process.env.VLLM_KEYS_FILE ?? null;
+}
+
+/**
+ * Compute SHA256 fingerprint from an SSH public key.
+ * Input format: "ssh-ed25519 AAAAC3... lts:username"
+ * Output: SHA256 hex digest (uppercase for consistency with OpenSSH)
+ */
+function computeKeyFingerprint(publicKeyLine: string): string {
+  const keyData = publicKeyLine.split(" ")[1]; // extract the base64-encoded key part
+  if (!keyData) {
+    throw new Error("Invalid public key format: cannot extract key data");
+  }
+  const hash = crypto.createHash("sha256");
+  hash.update(Buffer.from(keyData, "base64"));
+  return hash.digest("hex").toUpperCase();
 }
 
 /**
@@ -255,7 +270,16 @@ export async function provisionShellAccess(requestId: string): Promise<void> {
     now.getTime() + request.requestedDurationHours * 60 * 60 * 1000
   );
 
-  await prisma.shellGrant.create({
+  // Compute SSH key fingerprint for tracking
+  let keyFingerprint: string;
+  try {
+    keyFingerprint = computeKeyFingerprint(keypair.publicKey);
+  } catch (err) {
+    console.error("[provisioner] Failed to compute key fingerprint:", err);
+    throw new Error(`Shell provisioning failed: could not compute key fingerprint`);
+  }
+
+  const shellGrant = await prisma.shellGrant.create({
     data: {
       requestId,
       linuxUsername,
@@ -263,6 +287,18 @@ export async function provisionShellAccess(requestId: string): Promise<void> {
       sshPrivateKey: keypair.privateKey,
       initialPassword,
       isActive: true,
+    },
+  });
+
+  // Create SSH key record for fingerprint tracking and explicit revocation
+  await prisma.sshKeyRecord.create({
+    data: {
+      shellGrantId: shellGrant.id,
+      publicKey: keypair.publicKey,
+      keyType: "ed25519",
+      fingerprint: keyFingerprint,
+      comment: `lts:${linuxUsername}`,
+      isRevoked: false,
     },
   });
 
@@ -279,52 +315,263 @@ export async function provisionShellAccess(requestId: string): Promise<void> {
     metadata: {
       linuxUsername,
       expiresAt: expiresAt.toISOString(),
+      keyFingerprint,
     },
   });
 }
 
 // ─── Shell Access — Revoke ────────────────────────────────────────────────────
 
-export async function revokeShellAccess(grantId: string): Promise<void> {
+export interface RevocationStepResult {
+  step: string;
+  status: "SUCCESS" | "FAILED";
+  errorMessage?: string | null;
+  metadata?: Record<string, unknown> | null;
+}
+
+export async function revokeShellAccess(grantId: string): Promise<RevocationStepResult[]> {
   const grant = await prisma.shellGrant.findUniqueOrThrow({
     where: { id: grantId },
   });
 
-  if (!grant.isActive) return; // idempotent
+  if (!grant.isActive) return []; // idempotent
 
   const { linuxUsername } = grant;
+  const steps: RevocationStepResult[] = [];
+  const now = new Date();
 
-  // Lock the account so SSH logins are rejected immediately
+  // Step 1: Revoke SSH keys in database (mark all key records as revoked)
+  try {
+    const keyRecords = await prisma.sshKeyRecord.findMany({
+      where: { shellGrantId: grantId, isRevoked: false },
+    });
+
+    if (keyRecords.length > 0) {
+      await prisma.sshKeyRecord.updateMany({
+        where: { shellGrantId: grantId, isRevoked: false },
+        data: { isRevoked: true, revokedAt: now },
+      });
+
+      const fingerprints = keyRecords.map((kr) => kr.fingerprint);
+      steps.push({
+        step: "ssh_keys_revoked",
+        status: "SUCCESS",
+        metadata: { count: keyRecords.length, fingerprints },
+      });
+    }
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    console.error("[provisioner] Failed to revoke SSH keys in DB:", err);
+    steps.push({
+      step: "ssh_keys_revoked",
+      status: "FAILED",
+      errorMessage: errorMsg,
+    });
+  }
+
+  // Step 2: Lock the account so SSH logins are rejected immediately
   try {
     await execAsync(`sudo /sbin/usermod -L "${linuxUsername}"`, {
       timeout: 15_000,
     });
+    steps.push({
+      step: "account_locked",
+      status: "SUCCESS",
+      metadata: { linuxUsername },
+    });
   } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
     console.error("[provisioner] usermod -L failed:", err);
-    // Continue — still clear authorized_keys and mark DB revoked
+    steps.push({
+      step: "account_locked",
+      status: "FAILED",
+      errorMessage: errorMsg,
+    });
+    // Continue — still clear authorized_keys
   }
 
-  // Remove the authorized_keys entry so the key itself is invalid
+  // Step 3: Clear authorized_keys file
   const authKeysFile = `/home/${linuxUsername}/.ssh/authorized_keys`;
   try {
     await execAsync(`sudo truncate -s 0 "${authKeysFile}"`, {
       timeout: 10_000,
     });
+    steps.push({
+      step: "authorized_keys_cleared",
+      status: "SUCCESS",
+    });
   } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
     console.error("[provisioner] Failed to clear authorized_keys:", err);
+    steps.push({
+      step: "authorized_keys_cleared",
+      status: "FAILED",
+      errorMessage: errorMsg,
+    });
     // Non-fatal — account is already locked
   }
 
-  await prisma.shellGrant.update({
-    where: { id: grantId },
-    data: { isActive: false, revokedAt: new Date() },
-  });
+  // Step 4: Mark grant as revoked in database
+  try {
+    await prisma.shellGrant.update({
+      where: { id: grantId },
+      data: { isActive: false, revokedAt: now },
+    });
+    steps.push({
+      step: "grant_marked_revoked",
+      status: "SUCCESS",
+      metadata: { grantId },
+    });
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    console.error("[provisioner] Failed to update grant status:", err);
+    steps.push({
+      step: "grant_marked_revoked",
+      status: "FAILED",
+      errorMessage: errorMsg,
+    });
+  }
 
-  await writeAuditLog({
+  // Write detailed audit log with all steps
+  await writeDetailedAuditLog({
     actorId: SYSTEM_ACTOR,
     action: "SHELL_ACCESS_REVOKED",
     targetId: grantId,
     targetType: "ShellGrant",
+    steps,
     metadata: { linuxUsername },
   });
+
+  return steps;
 }
+
+// ─── Shell Access — Delete ────────────────────────────────────────────────────
+
+export interface DeleteResult {
+  success: boolean;
+  deletedAt: Date;
+  linuxUsername: string;
+  deleteReason?: string;
+  error?: string;
+}
+
+/**
+ * Permanently delete a revoked shell access account from the OS and mark it deleted in the DB.
+ * Only operates on accounts that are already revoked (isActive = false).
+ * Idempotent: returns early if already deleted.
+ */
+export async function deleteShellAccount(
+  grantId: string,
+  deleteReason: string = "manual_request"
+): Promise<DeleteResult> {
+  const grant = await prisma.shellGrant.findUniqueOrThrow({
+    where: { id: grantId },
+  });
+
+  const { linuxUsername } = grant;
+  const now = new Date();
+
+  // Prevent deletion of active accounts
+  if (grant.isActive) {
+    throw new Error(
+      `Cannot delete active shell account: ${linuxUsername} (grant is still active)`
+    );
+  }
+
+  // Idempotent: if already deleted, return early
+  if (grant.deletedAt) {
+    return {
+      success: true,
+      deletedAt: grant.deletedAt,
+      linuxUsername,
+      deleteReason: grant.deleteReason ?? undefined,
+    };
+  }
+
+  const steps: RevocationStepResult[] = [];
+
+  // Step 1: Delete OS user account and home directory
+  try {
+    const { stderr, stdout } = await execAsync(
+      `sudo /sbin/userdel -r "${linuxUsername}"`,
+      { timeout: 30_000 }
+    );
+    console.log(
+      `[provisioner] Successfully deleted OS user: ${linuxUsername}`,
+      stdout || ""
+    );
+    steps.push({
+      step: "os_account_deleted",
+      status: "SUCCESS",
+      metadata: { linuxUsername },
+    });
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    // Check if error is due to account not existing (idempotent scenario)
+    if (
+      errorMsg.includes("does not exist") ||
+      errorMsg.includes("No such user")
+    ) {
+      console.warn(
+        `[provisioner] OS user already deleted or never existed: ${linuxUsername}`
+      );
+      steps.push({
+        step: "os_account_deleted",
+        status: "SUCCESS",
+        metadata: { linuxUsername, note: "already_deleted" },
+      });
+    } else {
+      console.error("[provisioner] userdel failed:", err);
+      steps.push({
+        step: "os_account_deleted",
+        status: "FAILED",
+        errorMessage: errorMsg,
+      });
+      // Throw to prevent marking as deleted if OS deletion fails
+      throw new Error(`Failed to delete OS user ${linuxUsername}: ${errorMsg}`);
+    }
+  }
+
+  // Step 2: Update database to mark as deleted
+  try {
+    await prisma.shellGrant.update({
+      where: { id: grantId },
+      data: {
+        deletedAt: now,
+        deleteReason,
+        deleteScheduledAt: null, // clear any scheduled deletion
+      },
+    });
+    steps.push({
+      step: "db_marked_deleted",
+      status: "SUCCESS",
+      metadata: { grantId, deleteReason },
+    });
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    console.error("[provisioner] Failed to update grant deletion status:", err);
+    steps.push({
+      step: "db_marked_deleted",
+      status: "FAILED",
+      errorMessage: errorMsg,
+    });
+  }
+
+  // Write audit log
+  await writeDetailedAuditLog({
+    actorId: SYSTEM_ACTOR,
+    action: "SHELL_ACCOUNT_DELETED",
+    targetId: grantId,
+    targetType: "ShellGrant",
+    steps,
+    metadata: { linuxUsername, deleteReason },
+  });
+
+  return {
+    success: true,
+    deletedAt: now,
+    linuxUsername,
+    deleteReason,
+  };
+}
+
