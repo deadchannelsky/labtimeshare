@@ -210,6 +210,10 @@ print(response.choices[0].message.content)`}</pre>
                           for the full list of supported endpoints.
                         </p>
                       </div>
+                      {/* Cold-start warning */}
+                      <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+                        <span className="font-semibold">Note:</span> If a model is being loaded for the first time or a different model is being swapped in, your first request may take significantly longer than usual while the model warms up. Subsequent requests will respond normally.
+                      </p>
                       {req.expiresAt && (
                         <p className="text-xs text-gray-400">
                           Expires {formatDate(req.expiresAt)}
